@@ -45,6 +45,9 @@ from ...utils.deprecation import deprecate_kwarg
 from ...utils.generic import check_model_inputs
 from .configuration_llama import LlamaConfig
 
+import argparse
+# Import the MX library components
+from mx import Linear
 
 logger = logging.get_logger(__name__)
 
@@ -146,10 +149,19 @@ class LlamaMLP(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
+
+        mx_specs = getattr(config, 'mx_specs', None)
+        if mx_specs:
+            print(f"DEBUG: Initializing LlamaMLP with MX specs: {mx_specs['w_elem_format']}")
+            self.gate_proj = Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias, mx_specs=mx_specs)
+            self.up_proj = Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias, mx_specs=mx_specs)
+            self.down_proj = Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias, mx_specs=mx_specs)
+        else:
+            self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
+            self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
+            self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
         self.act_fn = ACT2FN[config.hidden_act]
+        
 
     def forward(self, x):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
@@ -207,18 +219,34 @@ class LlamaAttention(nn.Module):
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
 
-        self.q_proj = nn.Linear(
-            config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.k_proj = nn.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.v_proj = nn.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.o_proj = nn.Linear(
-            config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
-        )
+        mx_specs = getattr(config, 'mx_specs', None)
+        if mx_specs:
+            self.q_proj = Linear(
+                config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias, mx_specs=mx_specs
+            )
+            self.k_proj = Linear(
+                config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias, mx_specs=mx_specs
+            )
+            self.v_proj = Linear(
+                config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias, mx_specs=mx_specs
+            )
+            self.o_proj = Linear(
+                config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias, mx_specs=mx_specs
+            )
+        else:
+            self.q_proj = nn.Linear(
+                config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
+            )
+            self.k_proj = nn.Linear(
+                config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
+            )
+            self.v_proj = nn.Linear(
+                config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
+            )
+            self.o_proj = nn.Linear(
+                config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
+            )
+        
 
     @deprecate_kwarg("past_key_value", new_name="past_key_values", version="4.58")
     def forward(
